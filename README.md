@@ -1,4 +1,4 @@
-# **Assignment 2: Time Series Analysis**
+# Time Series Analysis**
 
 ## **Overview**
 This project explores the **Metro Interstate Traffic Volume** dataset to analyze traffic patterns using univariate and multivariate time-series modeling. The goal is to forecast future traffic volumes and gain insights into seasonal and trend-based variations. The project includes exploratory data analysis, ARIMA and SARIMA modeling for univariate time series, and VAR modeling for multivariate time series forecasting.
