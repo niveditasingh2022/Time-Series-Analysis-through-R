@@ -1,0 +1,312 @@
+```{r}
+# Loading necessary libraries
+library(tidyverse)
+library(lubridate)
+library(forecast)
+library(tseries)
+library(vars)
+library(ggplot2)
+library(cowplot)
+library(zoo)
+library(dplyr)
+
+###################################### Starting Task 1###################################################################
+
+# Task 1(Time Series Exploration)
+
+# Loading the traffic dataset
+data <- read.csv("D:/Data/My Course/4. Fourth Semester/Advanced Data Analysis/Assignment 2/Metro_Interstate_Traffic_Volume.csv")
+
+# Converting date_time to POSIXct (Date time conversion function)
+data$date_time <- as.POSIXct(data$date_time)
+
+# Displaying the first few rows and structure of the dataset--
+head(data)
+str(data)
+
+# Check for NA values in each column
+na_counts <- colSums(is.na(data))
+print("NA counts in each column:")
+print(na_counts)
+
+# Encoding the textual data to numbers before further analysis--
+data$holiday <- as.numeric(factor(data$holiday))
+data$weather_main <- as.numeric(factor(data$weather_main))
+data$weather_description <- as.numeric(factor(data$weather_description))
+
+# Ensure traffic_volume is numeric
+data$traffic_volume <- as.numeric(data$traffic_volume)
+
+# Removing rows with NA values in critical columns
+data_clean <- data %>%
+  filter(!is.na(date_time) & !is.na(traffic_volume))
+
+# Check the structure and summary of the cleaned data
+str(data_clean)
+summary(data_clean)
+
+# Showing the Descriptive statistics for traffic_volume--
+summary(data_clean$traffic_volume)
+
+# Plot the traffic volume over time  (reduced opacity)
+ggplot(data_clean, aes(x = date_time, y = traffic_volume)) +
+  geom_line(alpha = 0.1) +
+  labs(title = "Traffic Volume Over Time", x = "Date Time", y = "Traffic Volume")
+
+# Check for missing data points
+data_missing <- data_clean %>%
+  complete(date_time = seq(min(date_time), max(date_time), by = "hour"))
+
+# Interpolate missing traffic_volume values
+data_missing$traffic_volume <- na.approx(data_missing$traffic_volume)
+
+# Plot the interpolated traffic volume over time
+ggplot(data_missing, aes(x = date_time, y = traffic_volume)) +
+  geom_line(alpha = 0.1) +
+  labs(title = "Interpolated Traffic Volume Over Time", x = "Date Time", y = "Traffic Volume")
+
+# Filter data for a specific period (e.g., one month)
+data_subset <- data_clean %>%
+  filter(date_time >= as.POSIXct("2016-01-01") & date_time <= as.POSIXct("2016-01-31"))
+
+# Plot the traffic volume over the specific period
+ggplot(data_subset, aes(x = date_time, y = traffic_volume)) +
+  geom_line() +
+  labs(title = "Traffic Volume in January 2016", x = "Date Time", y = "Traffic Volume")
+
+# Create a time series object using the interpolated data
+ts_data <- ts(data_missing$traffic_volume, frequency = 24)
+
+# Decompose the time series
+decomposed <- stl(ts_data, s.window = "periodic")
+plot(decomposed)
+
+# ACF and PACF plots
+par(mfrow = c(1, 2))
+acf(ts_data, main = 'ACF of Traffic Volume')
+pacf(ts_data, main = 'PACF of Traffic Volume')
+
+# Augmented Dickey-Fuller Test for stationary
+adf_test_result <- adf.test(ts_data, alternative = "stationary")
+print(adf_test_result)
+
+# Trend test (using linear regression on time series)
+time_index <- 1:length(ts_data)
+trend_model <- lm(ts_data ~ time_index)
+summary(trend_model)
+############################################################ Ending Task 1 ###############################################
+
+#  Starting Task 2 (Univariate Time-series Models)-----
+
+# Optimized selection of the best ARIMA model
+best_arima_model <- auto.arima(ts_data, seasonal = FALSE, stepwise = TRUE, approximation = TRUE)
+summary(best_arima_model)
+
+# Optimized selection of the best SARIMA model
+best_sarima_model <- auto.arima(ts_data, seasonal = TRUE, stepwise = TRUE, approximation = TRUE)
+summary(best_sarima_model)
+
+# Compare models using AIC and BIC
+aic_arima <- AIC(best_arima_model)
+bic_arima <- BIC(best_arima_model)
+
+aic_sarima <- AIC(best_sarima_model)
+bic_sarima <- BIC(best_sarima_model)
+
+aic_bic_comparison <- data.frame(
+  Model = c("ARIMA", "SARIMA"),
+  AIC = c(aic_arima, aic_sarima),
+  BIC = c(bic_arima, bic_sarima)
+)
+print(aic_bic_comparison)
+
+# Function to convert time index to actual datetime for plotting
+convert_to_datetime <- function(start_time, time_indices, frequency) {
+  time_delta <- as.difftime(time_indices / frequency, units = "hours")
+  start_time + time_delta
+}
+
+# Get the end time of the actual time series data
+end_time <- max(data_missing$date_time)
+
+# Forecast the next 24 hours using the best ARIMA model
+forecast_arima <- forecast(best_arima_model, h = 24)
+time_indices_arima <- seq_along(forecast_arima$mean)
+forecast_arima_df <- data.frame(
+  Time = convert_to_datetime(end_time, time_indices_arima, frequency(ts_data)),
+  Forecast = as.numeric(forecast_arima$mean)
+)
+
+# Plot ARIMA forecast
+ggplot(forecast_arima_df, aes(x = Time, y = Forecast)) +
+  geom_line(color = "blue") +
+  labs(title = "ARIMA Model Forecast for Next 24 Hours", x = "Time", y = "Traffic Volume") +
+  theme_minimal() +
+  scale_x_datetime(date_labels = "%Y-%m-%d %H:%M", date_breaks = "1 hour") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Forecast the next 24 hours using the best SARIMA model
+forecast_sarima <- forecast(best_sarima_model, h = 24)
+time_indices_sarima <- seq_along(forecast_sarima$mean)
+forecast_sarima_df <- data.frame(
+  Time = convert_to_datetime(end_time, time_indices_sarima, frequency(ts_data)),
+  Forecast = as.numeric(forecast_sarima$mean)
+)
+
+# Plot SARIMA forecast
+ggplot(forecast_sarima_df, aes(x = Time, y = Forecast)) +
+  geom_line(color = "blue") +
+  labs(title = "SARIMA Model Forecast for Next 24 Hours", x = "Time", y = "Traffic Volume") +
+  theme_minimal() +
+  scale_x_datetime(date_labels = "%Y-%m-%d %H:%M", date_breaks = "1 hour") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Analysis and Comments
+print("ARIMA Model Summary:")
+print(summary(best_arima_model))
+print("SARIMA Model Summary:")
+print(summary(best_sarima_model))
+print("AIC and BIC Comparison:")
+print(aic_bic_comparison)
+
+########################################################### Ending Task 2 #####################################
+
+# Starting Task 3(Multivariate Time-series Models) -----
+
+# Loading the dataset
+data <- read.csv("D:/Data/My Course/4. Fourth Semester/Advanced Data Analysis/Assignment 2/Metro_Interstate_Traffic_Volume.csv")
+
+# Check for any NA values in date_time
+data <- data[!is.na(data$date_time) & !is.na(data$traffic_volume), ]
+
+# Convert date_time to POSIXct
+data$date_time <- ymd_hms(data$date_time, tz = "UTC")
+
+# Create a complete sequence of date_time values (hourly)
+start_time <- min(data$date_time, na.rm = TRUE)
+end_time <- max(data$date_time, na.rm = TRUE)
+print(paste("Start time: ", start_time))
+print(paste("End time: ", end_time))
+complete_times <- seq(start_time, end_time, by = "hour")
+# Check if complete_times has any unexpected values
+print(head(complete_times))
+print(tail(complete_times))
+
+# Merge the complete sequence with the data to handle missing date_times
+data_complete <- merge(data.frame(date_time = complete_times), data, by = "date_time", all.x = TRUE)
+
+# Interpolate missing traffic_volume values
+data_complete$traffic_volume <- na.approx(data_complete$traffic_volume, na.rm = FALSE)
+
+# Ensure all other columns have no NA values
+data_complete[is.na(data_complete)] <- 0
+
+# Check for NA values after merging
+na_counts <- colSums(is.na(data_complete))
+print("NA counts after merging and interpolation:")
+print(na_counts)
+
+# Select relevant features for multivariate analysis using base R
+data_multivariate <- data_complete[, c("date_time", "traffic_volume", "temp", "holiday", "weather_main", "weather_description")]
+
+# Encode categorical columns as numeric factors
+data_multivariate$holiday <- as.numeric(factor(data_multivariate$holiday))
+data_multivariate$weather_main <- as.numeric(factor(data_multivariate$weather_main))
+data_multivariate$weather_description <- as.numeric(factor(data_multivariate$weather_description))
+
+# Check for any NA values in data_multivariate after encoding
+na_counts_multivariate <- colSums(is.na(data_multivariate))
+print("NA counts in data_multivariate after encoding:")
+print(na_counts_multivariate)
+
+# Interpolate any remaining NA values in data_multivariate
+data_multivariate$traffic_volume <- zoo::na.approx(data_multivariate$traffic_volume, na.rm = FALSE)
+data_multivariate$temp <- zoo::na.approx(data_multivariate$temp, na.rm = FALSE)
+data_multivariate$holiday <- zoo::na.approx(data_multivariate$holiday, na.rm = FALSE)
+data_multivariate$weather_main <- zoo::na.approx(data_multivariate$weather_main, na.rm = FALSE)
+data_multivariate$weather_description <- zoo::na.approx(data_multivariate$weather_description, na.rm = FALSE)
+
+# Ensure all columns are numeric (except date_time)
+data_multivariate$holiday <- as.numeric(data_multivariate$holiday)
+data_multivariate$weather_main <- as.numeric(data_multivariate$weather_main)
+data_multivariate$weather_description <- as.numeric(data_multivariate$weather_description)
+data_multivariate$traffic_volume <- as.numeric(data_multivariate$traffic_volume)
+data_multivariate$temp <- as.numeric(data_multivariate$temp)
+
+# Reduce data size for faster computation: Use last 30 days of data (Previously, I checked it with all dataset and it took 10-15 minutes to run this chunk)
+data_multivariate <- data_multivariate %>% 
+  filter(date_time >= (end_time - days(30)))
+
+# Create a time series object for multivariate analysis
+ts_multivariate <- ts(data_multivariate[,-1], frequency = 24) # Assuming hourly data
+
+# Function to evaluate models (Using AIC and BIC)
+evaluate_var_model <- function(data, max_lag) {
+  aic_values <- numeric(max_lag)
+  bic_values <- numeric(max_lag)
+  
+  for (p in 1:max_lag) {
+    tryCatch({
+      var_model <- VAR(data, p = p, type = "const")
+      aic_values[p] <- AIC(var_model)
+      bic_values[p] <- BIC(var_model)
+    }, error = function(e) {
+      aic_values[p] <- NA
+      bic_values[p] <- NA
+      message(paste("Error in fitting VAR model for lag", p, ":", e$message))
+    })
+  }
+  
+  return(data.frame(Lag = 1:max_lag, AIC = aic_values, BIC = bic_values))
+}
+
+# Evaluate models with lags from 1 to 2 (Choosed lag 2 to reduce computation time)
+model_evaluation <- evaluate_var_model(ts_multivariate, max_lag = 2)
+
+# Printing evaluation results
+print(model_evaluation)
+
+# Ploting AIC and BIC values
+ggplot(model_evaluation, aes(x = Lag)) +
+  geom_line(aes(y = AIC, color = "AIC")) +
+  geom_line(aes(y = BIC, color = "BIC")) +
+  labs(title = "Model Evaluation using AIC and BIC", x = "Lag", y = "Criterion Value") +
+  theme_minimal()
+
+# Selecting the best model based on the lowest AIC value--
+best_lag <- model_evaluation$Lag[which.min(model_evaluation$AIC)]
+
+# Fit the best VAR model
+best_var_model <- VAR(ts_multivariate, p = best_lag, type = "const")
+
+# Forecasting for the next 24 hours--
+forecast_var <- predict(best_var_model, n.ahead = 24)
+
+# Extract predictions
+forecast_values <- forecast_var$fcst$traffic_volume[, 1]
+
+# Creating a data frame for plotting
+forecast_df <- data.frame(
+  Time = seq(end_time + 3600, by = "hour", length.out = 24),
+  Forecast = forecast_values
+)
+
+# Plot the predictions for the next 24 hours
+ggplot(forecast_df, aes(x = Time, y = Forecast)) +
+  geom_line(color = "blue") +
+  labs(title = "VAR Model Forecast for Next 24 Hours", x = "Time", y = "Traffic Volume") +
+  theme_minimal() +
+  scale_x_datetime(date_labels = "%Y-%m-%d %H:%M", date_breaks = "1 hour") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+# Compare univariate and multivariate models
+print("Comparison of Univariate and Multivariate Models:")
+print(paste("Best Univariate Model AIC: ", aic_arima))
+print(paste("Best Multivariate Model AIC: ", AIC(best_var_model)))
+
+#  Further analysis and Comments--
+print("Best VAR Model Summary:")
+print(summary(best_var_model))
+############################################ Ending Task 3 successfully ########################
+```
+
